@@ -19,8 +19,8 @@
 #define CHAR_COMMAND_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26a9"
 
 // ── Pin & OLED ────────────────────────────────────────────────────────────────
-#define I2C_SDA    8
-#define I2C_SCL    9
+#define I2C_SDA    21
+#define I2C_SCL    22
 #define OLED_ADDR  0x3C
 #define OLED_W     128
 #define OLED_H     64
@@ -31,7 +31,7 @@
 #define MPU_PWR_MGMT    0x6B
 #define MPU_ACCEL_XOUT  0x3B
 #define MPU_INTERVAL_MS 3      // 333Hz — 512 mẫu ≈ 1.54s (< 2s yêu cầu)
-#define MPU_BATCH_SIZE  4      // Gom 4 mẫu/gói BLE → gửi mỗi 12ms
+#define MPU_BATCH_SIZE  16      // Gom 16 mẫu/gói BLE → gửi mỗi 12ms
 
 // ── MAX30102 ──────────────────────────────────────────────────────────────────
 #define BUF_SIZE     100
@@ -93,9 +93,7 @@ Biquad    bpLPF = {0.1441f, 0.2882f,0.1441f,-0.6776f,0.2539f};
 // ── OLED ──────────────────────────────────────────────────────────────────────
 Adafruit_SSD1306 oled(OLED_W, OLED_H, &Wire, OLED_RST);
 
-// ════════════════════════════════════════════════════════════════════════════
 // BLE
-// ════════════════════════════════════════════════════════════════════════════
 class ServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer* pSrv) override {
         bleConnected = true;
@@ -118,7 +116,7 @@ class CommandCallbacks : public BLECharacteristicCallbacks {
 };
 
 void bleInit() {
-    BLEDevice::init("ESP32-SmartWatch");
+    BLEDevice::init("ESP32-SmartWatch_HUY");
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new ServerCallbacks());
 
@@ -148,18 +146,17 @@ void bleInit() {
 }
 
 // ── Gửi batch dữ liệu — 1 gói BLE chứa MPU_BATCH_SIZE mẫu magnitude ─────────
-// Format: "B:75,S:98,F:1,AX:0.83,AY:-0.41,AZ:-0.52,M:9.81|9.82|9.80|9.83"
+// Format: "B:75,S:98,F:1,M:9.81|9.82|9.80|9.83"
 // Android unpack M → thêm từng giá trị vào fall detection buffer
 // MTU=64: fixed part ~43 chars + 4×"9.81|" ~20 chars = ~63 chars ✓
 static void bleSendData(int32_t bpm, int32_t spo2, bool finger,
-                        float ax, float ay, float az,
                         float* mags, int magCount) {
     if (!bleConnected) return;
 
     char buf[64];
     int pos = snprintf(buf, sizeof(buf),
-                       "B:%ld,S:%ld,F:%d,AX:%.2f,AY:%.2f,AZ:%.2f,M:",
-                       bpm, spo2, finger ? 1 : 0, ax, ay, az);
+                       "B:%ld,S:%ld,F:%d,M:",
+                       bpm, spo2, finger ? 1 : 0);
     for (int i = 0; i < magCount && pos < (int)sizeof(buf) - 7; i++) {
         if (i > 0) buf[pos++] = '|';
         pos += snprintf(buf + pos, sizeof(buf) - pos, "%.2f", mags[i]);
@@ -173,9 +170,7 @@ static void bleSendData(int32_t bpm, int32_t spo2, bool finger,
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // MPU6050 helpers
-// ════════════════════════════════════════════════════════════════════════════
 static void mpuWriteReg(uint8_t reg, uint8_t val) {
     Wire.beginTransmission(MPU_ADDR);
     Wire.write(reg);
@@ -218,9 +213,7 @@ static MpuData mpuRead() {
     return d;
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // MAX30102 helpers
-// ════════════════════════════════════════════════════════════════════════════
 static float applyBiquad(Biquad &f, float x) {
     float y = f.b0*x + f.z1;
     f.z1 = f.b1*x - f.a1*y + f.z2;
@@ -273,15 +266,11 @@ static void collectSamples(int from, int count, bool &fingerOn) {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // TASK 1 — MPU6050 @ 100Hz  (Core 0)
 // Đọc gia tốc → gửi BLE characteristic MPU riêng
-// ════════════════════════════════════════════════════════════════════════════
-// ════════════════════════════════════════════════════════════════════════════
 // TASK 1 — MPU6050 @ 333Hz  (Core 0)
 // Gom MPU_BATCH_SIZE mẫu → gửi 1 gói BLE mỗi 12ms
 // 333Hz → 512 mẫu ≈ 1.54s < 2s yêu cầu của fall detection model
-// ════════════════════════════════════════════════════════════════════════════
 void taskMPU(void* param) {
     TickType_t xLastWake = xTaskGetTickCount();
     const TickType_t xPeriod = pdMS_TO_TICKS(MPU_INTERVAL_MS);
@@ -318,7 +307,6 @@ void taskMPU(void* param) {
         // Đủ batch → gửi 1 gói BLE chứa MPU_BATCH_SIZE mẫu
         if (batchIdx >= MPU_BATCH_SIZE) {
             bleSendData(bpm, spo2, finger,
-                        mpu.ax, mpu.ay, mpu.az,
                         magBatch, MPU_BATCH_SIZE);
             batchIdx = 0;
         }
@@ -327,10 +315,8 @@ void taskMPU(void* param) {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // TASK 2 — MAX30102 HR/SpO2  (Core 1)
 // Chạy liên tục, mỗi vòng lấy 25 mẫu → tính BPM/SpO2 → gửi BLE riêng
-// ════════════════════════════════════════════════════════════════════════════
 void taskMAX30102(void* param) {
     bool fingerOn  = false;
     bool prevFinger = false;
@@ -398,9 +384,7 @@ void taskMAX30102(void* param) {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // OLED
-// ════════════════════════════════════════════════════════════════════════════
 static void renderOLED() {
     // Snapshot shared data
     xSemaphoreTake(dataMutex, portMAX_DELAY);
@@ -438,9 +422,7 @@ static void renderOLED() {
     xSemaphoreGive(i2cMutex);
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // SETUP
-// ════════════════════════════════════════════════════════════════════════════
 void setup() {
     Serial.begin(115200);
     Wire.begin(I2C_SDA, I2C_SCL);
@@ -492,9 +474,7 @@ void setup() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // LOOP — chỉ vẽ OLED ~5Hz (Core 1, chạy song song với taskMAX)
-// ════════════════════════════════════════════════════════════════════════════
 void loop() {
     renderOLED();
     vTaskDelay(pdMS_TO_TICKS(200));  // 5Hz đủ cho OLED
