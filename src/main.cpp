@@ -153,6 +153,22 @@ class CommandCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
         std::string val = c->getValue();
         if (val == "RESET") Serial.println("[BLE] RESET command received");
+        if (val == "FALL:YES") {
+            xSemaphoreTake(dataMutex, portMAX_DELAY);
+            g_fallDetected  = true;
+            g_fallAlertTime = millis();
+            xSemaphoreGive(dataMutex);
+            Serial.println("[BLE] FALL:YES received from app");
+        }
+        else if (val == "FALL:NO") {
+            xSemaphoreTake(dataMutex, portMAX_DELAY);
+            g_fallDetected = false;
+            xSemaphoreGive(dataMutex);
+            Serial.println("[BLE] FALL:NO received from app");
+        }
+        else if (val == "RESET") {
+            Serial.println("[BLE] RESET command received");
+        }
     }
 };
 
@@ -642,12 +658,9 @@ static void renderOLED() {
         oled.setCursor(0, 42);
         oled.printf("Mag:%.2fg", mag);
 
+
         oled.setCursor(72, 42);
-        if (fall) {
-            oled.print("FALL:!!!");
-        } else {
-            oled.print("FALL: OK");
-        }
+        oled.print(fall ? "FALL:YES" : "FALL: NO");
 
         oled.setCursor(0, 54);
         oled.print(bleConnected ? "BLE: Connected" : "BLE: Advertising");
@@ -660,7 +673,6 @@ static void renderOLED() {
         oled.setCursor(20, 13);
         oled.print("\x03");   // ký tự trái tim trong font Adafruit GFX (char 3)
         // Nếu font không có trái tim, thay bằng "HR"
-        // oled.print("HR");
 
         // BPM (trái - compact)
         oled.setTextSize(1);
@@ -700,15 +712,12 @@ static void renderOLED() {
 
         oled.setCursor(72, 43);
         if (fall) {
-            // Nhấp nháy khi ngã (blink 500ms)
-            if ((millis() / 500) % 2 == 0) {
-                oled.print("FALL:!!!");
-            } else {
-                oled.print("        ");  // trống để nhấp nháy
-            }
+            if ((millis() / 500) % 2 == 0) oled.print("FALL:YES");
+            else                            oled.print("        ");
         } else {
-            oled.print("FALL: OK");
+            oled.print("FALL: NO");
         }
+
 
         // ── Dòng 4: BLE status (y=54, size1) ─────────────────────────────────
         oled.setCursor(0, 54);
