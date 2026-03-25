@@ -1,18 +1,3 @@
-/*
- * ESP32 SmartWatch — NimBLE 2.x Edition
- *
- * Fix NimBLE 2.x API:
- *   onConnect   (NimBLEServer*, NimBLEConnInfo&)
- *   onDisconnect(NimBLEServer*, NimBLEConnInfo&, int reason)  ← thêm int reason
- *   onWrite     (NimBLECharacteristic*, NimBLEConnInfo&)
- *   pServer->start() thay vì pService->start()
- *   enableScanResponse() thay vì setScanResponse()
- *
- * MPU6050 @ 66.7 Hz (15 ms) → 512 mẫu = 7.68 s < 8 s
- * Batch 8 mẫu → gửi BLE mỗi 120 ms  (CHAR_MPU_UUID)
- * MAX30102 → gửi BLE mỗi 1 s         (CHAR_HEALTH_UUID)
- */
-
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
