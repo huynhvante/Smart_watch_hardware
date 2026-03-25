@@ -673,7 +673,7 @@ static void renderOLED() {
         else oled.print("--");
 
         oled.setTextSize(1);
-        oled.setCursor(32, 28);
+        oled.setCursor(35, 28);
         oled.print("bpm");   // thay vì "bpm"
 
         // SpO2 — bên phải
