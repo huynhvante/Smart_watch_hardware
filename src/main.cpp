@@ -154,8 +154,8 @@ uint32_t  irBuf[BUF_SIZE], redBuf[BUF_SIZE];
 FIRState  firIR, firRed;
 AGCState  agc;
 MedianBuf mbpm, mspo2;
-Biquad    bpHPF(0.9150f, -1.8300f, 0.9150f, -1.8226f, 0.8373f);
-Biquad    bpLPF(0.1441f,  0.2882f, 0.1441f, -0.6776f, 0.2539f);
+// Biquad    bpHPF(0.9150f, -1.8300f, 0.9150f, -1.8226f, 0.8373f);
+// Biquad    bpLPF(0.1441f,  0.2882f, 0.1441f, -0.6776f, 0.2539f);
 
 // OLED
 Adafruit_SSD1306 oled(OLED_W, OLED_H, &Wire, OLED_RST);
@@ -384,7 +384,7 @@ static void collectSamples(int from, int count, bool& fingerOn) {
         agcTick(agc,rawIR,fingerOn);
         irBuf[i] =(uint32_t)max(0.0f,applyFIR(firIR, (float)rawIR));
         redBuf[i]=(uint32_t)max(0.0f,applyFIR(firRed,(float)rawRed));
-        applyBiquad(bpLPF,applyBiquad(bpHPF,(float)rawIR));
+        // applyBiquad(bpLPF,applyBiquad(bpHPF,(float)rawIR));
     }
 }
 
@@ -462,12 +462,6 @@ static void drawPageDots(int y) {
     }
 }
 
-// Vẽ icon BLE (chấm đặc = connected, vòng = advertising)
-static void drawBleIcon(int x, int y, int r) {
-    if (bleConnected) oled.fillCircle(x, y, r, SSD1306_WHITE);
-    else              oled.drawCircle(x, y, r, SSD1306_WHITE);
-}
-
 // Vẽ progress bar  — x,y = top-left góc ngoài, w,h = kích thước tổng
 static void drawProgressBar(int x, int y, int w, int h, int pct) {
     pct = constrain(pct, 0, 100);
@@ -520,7 +514,6 @@ static void drawBpmChart(int cx, int cy, int cw, int ch) {
 }
 
 // RENDER LAYOUT 0 — Tổng quan (Overview)
-//
 // y=0–15  : HH:MM (size2, 60px) | DD/MM (size1) | page dots | BLE icon
 // y=16    : ─────────────────────────────
 // y=18–42 : HR + SpO2 (size2 cho số) OR "Đặt ngón tay"
@@ -543,8 +536,6 @@ static void renderLayout0(int32_t bpm, int32_t spo2, bool finger, float mag, boo
 
     // ── Page dots + BLE icon ───────────────────────────────────────────────────
     drawPageDots(3);
-    drawBleIcon(118, 0, 3);
-
     oled.drawLine(0, 17, OLED_W-1, 17, SSD1306_WHITE);
 
     // ── HR + SpO2 ─────────────────────────────────────────────────────────────
@@ -557,13 +548,13 @@ static void renderLayout0(int32_t bpm, int32_t spo2, bool finger, float mag, boo
         oled.setTextSize(1); oled.setCursor(0, 19);  oled.print("HR");
         oled.setTextSize(2); oled.setCursor(0, 27);
         if (bpm > 0) oled.print(bpm); else oled.print("--");
-        oled.setTextSize(1); oled.setCursor(30, 36); oled.print("bpm");
+        oled.setTextSize(1); oled.setCursor(36, 36); oled.print("bpm");
 
         // SpO2
         oled.setTextSize(1); oled.setCursor(72, 19); oled.print("SpO2");
         oled.setTextSize(2); oled.setCursor(72, 27);
         if (spo2 > 0) oled.print(spo2); else oled.print("--");
-        oled.setTextSize(1); oled.setCursor(108, 36); oled.print("%");
+        oled.setTextSize(1); oled.setCursor(100, 36); oled.print("%");
     }
 
     oled.drawLine(0, 44, OLED_W-1, 44, SSD1306_WHITE);
@@ -604,7 +595,6 @@ static void renderLayout1(int32_t bpm, bool finger) {
     oled.setCursor(0, 0);
     oled.print("HEART RATE");
     drawPageDots(3);
-    drawBleIcon(118, 0, 3);
     oled.drawLine(0, 9, OLED_W-1, 9, SSD1306_WHITE);
 
     // ── Biểu đồ BPM history (15 phút) ────────────────────────────────────────
@@ -657,7 +647,7 @@ static void renderLayout1(int32_t bpm, bool finger) {
         else                       oled.print("Measuring...");
 
         // Progress bar: x=0 y=53 w=108 h=8
-        drawProgressBar(0, 54, 108, 8, pct);
+        drawProgressBar(0, 54, 100, 8, pct);
 
         // Phần trăm bên phải bar
         oled.setCursor(104, 55);
@@ -689,7 +679,6 @@ static void renderLayout2(float mag, float ax, float ay, float az, bool fall) {
     oled.setCursor(0, 0);
     oled.print("FALL DETECTION");
     drawPageDots(3);
-    drawBleIcon(124, 0, 3);
     oled.drawLine(0, 9, OLED_W-1, 9, SSD1306_WHITE);
 
     // ── Nguy cơ té ngã ────────────────────────────────────────────────────────
@@ -720,15 +709,15 @@ static void renderLayout2(float mag, float ax, float ay, float az, bool fall) {
     uint32_t upH   = upSec / 3600;
     uint32_t upM   = (upSec % 3600) / 60;
 
-    oled.setCursor(0, 41);
+    oled.setCursor(0, 42);
     oled.printf("Uptime: %luh %02lum", upH, upM);
 
     // ── BLE status ────────────────────────────────────────────────────────────
     oled.setCursor(0, 52);
-    oled.print(bleConnected ? "BLE: Connected" : "BLE: Disconnected...");
+    oled.print(bleConnected ? "BLE:Connected" : "BLE:Disconnected...");
 
     // ── Firmware version ──────────────────────────────────────────────────────
-    oled.setCursor(80, 52);
+    oled.setCursor(80, 62);
     oled.print("v" FW_VERSION);
 
     // ── Gợi ý BTN2 khi có fall ───────────────────────────────────────────────
