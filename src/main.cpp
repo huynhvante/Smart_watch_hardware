@@ -17,8 +17,8 @@
 #define CHAR_DATETIME_UUID "beb5483e-36e1-4688-b7f5-ea07361b26ab"
 
 // Pin & OLED
-#define I2C_SDA   21
-#define I2C_SCL   22
+#define I2C_SDA   8
+#define I2C_SCL   9
 #define OLED_ADDR 0x3C
 #define OLED_W    128
 #define OLED_H    64
@@ -28,8 +28,8 @@
 // QUAN TRỌNG: GPIO 34-39 trên ESP32 classic là input-only, KHÔNG có internal
 // pull-up. Dùng GPIO 32/33 (có pull-up) hoặc gắn điện trở 10kΩ lên 3.3V.
 // Active LOW — nhấn nối GND.
-#define BTN_SWITCH_PIN   32   // Nút 1: chuyển layout  (INPUT_PULLUP)
-#define BTN_CONFIRM_PIN  33   // Nút 2: confirm / đo   (INPUT_PULLUP)
+#define BTN_SWITCH_PIN   0   // Nút 1: chuyển layout  (INPUT_PULLUP)
+#define BTN_CONFIRM_PIN  1    // Nút 2: confirm / đo   (INPUT_PULLUP)
 #define BTN_DEBOUNCE_MS  250  // ms hold-off chống rung
 
 // MPU6050
