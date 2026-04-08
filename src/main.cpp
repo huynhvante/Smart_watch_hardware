@@ -24,26 +24,24 @@
 #define OLED_H    64
 #define OLED_RST  -1
 
-// Button Pins
-// QUAN TRỌNG: GPIO 34-39 trên ESP32 classic là input-only, KHÔNG có internal
-// pull-up. Dùng GPIO 32/33 (có pull-up) hoặc gắn điện trở 10kΩ lên 3.3V.
-// Active LOW — nhấn nối GND.
-#define BTN_SWITCH_PIN   0   // Nút 1: chuyển layout  (INPUT_PULLUP)
-#define BTN_CONFIRM_PIN  1    // Nút 2: confirm / đo   (INPUT_PULLUP)
-#define BTN_DEBOUNCE_MS  250  // ms hold-off chống rung
+// Button Pins — PULL UP, active LOW (nhấn nối GND, thả = HIGH)
+// Dùng internal pull-up của ESP32-C3, nhấn nút nối GPIO xuống GND
+#define BTN_SWITCH_PIN   10   // Nút 1: chuyển layout
+#define BTN_CONFIRM_PIN  3    // Nút 2: confirm / đo
+#define BTN_DEBOUNCE_MS  250  // ms chống rung
 
 // MPU6050
 #define MPU_ADDR        0x68
 #define MPU_PWR_MGMT    0x6B
 #define MPU_ACCEL_XOUT  0x3B
-#define MPU_INTERVAL_MS 15
+#define MPU_INTERVAL_MS 25
 #define MPU_BATCH_SIZE  8
 
 // MAX30102
-#define BUF_SIZE               100
-#define SHIFT_SIZE             25
+#define BUF_SIZE               50
+#define SHIFT_SIZE             10
 #define AGC_DC_LOW             20000UL
-#define AGC_DC_HIGH            50000UL
+#define AGC_DC_HIGH            40000UL
 #define AGC_STEP               5
 #define AGC_UPDATE_N           25
 #define AGC_BR_MIN             10
@@ -58,17 +56,17 @@
 #define HEALTH_BLE_INTERVAL_MS 1000UL
 
 // Fall Detection
-#define FREE_FALL_THR  0.4f   // g
-#define IMPACT_THR     2.5f   // g
+#define FREE_FALL_THR  0.4f
+#define IMPACT_THR     2.5f
 #define FALL_WINDOW_MS 500
 #define FALL_ALERT_MS  5000
 
 // BPM History — 30 mẫu × 30 giây = 15 phút
 #define BPM_HIST_SIZE        30
-#define BPM_HIST_INTERVAL_MS 30000UL   // 30s / mẫu
+#define BPM_HIST_INTERVAL_MS 30000UL
 
 // Chế độ đo chính xác (Layout 1, Nút 2)
-#define MEAS_DURATION_MS 20000UL   // 20 giây
+#define MEAS_DURATION_MS 20000UL
 
 // Firmware version
 #define FW_VERSION "1.1.0"
@@ -76,7 +74,7 @@
 // Số layout
 #define NUM_LAYOUTS 3
 
-// Structs
+// ── Structs ───────────────────────────────────────────────────────────────
 static const float FIR_W[FIR_LEN] = { 0.10f, 0.20f, 0.40f, 0.20f, 0.10f };
 
 struct Biquad {
@@ -91,14 +89,14 @@ struct MedianBuf { int32_t arr[MED_LEN] = {}; int head = 0, count = 0; };
 enum FallState  { FALL_IDLE, FALL_FREEFALL, FALL_DETECTED };
 enum MeasState  { MEAS_IDLE, MEAS_RUNNING, MEAS_DONE };
 
-// FreeRTOS Mutex
+// ── FreeRTOS Mutex ────────────────────────────────────────────────────────
 SemaphoreHandle_t i2cMutex;
 SemaphoreHandle_t bleMutex;
 SemaphoreHandle_t dataMutex;
 SemaphoreHandle_t dtMutex;
-SemaphoreHandle_t histMutex;   // bảo vệ BPM history
+SemaphoreHandle_t histMutex;
 
-// Shared data (guarded by dataMutex)
+// ── Shared data (guarded by dataMutex) ────────────────────────────────────
 volatile int32_t   g_dispBPM      = 0;
 volatile int32_t   g_dispSpO2     = 0;
 volatile bool      g_fingerOn     = false;
@@ -111,9 +109,29 @@ volatile FallState g_fallState     = FALL_IDLE;
 volatile uint32_t  g_freeFallTime  = 0;
 
 // ── UI State ──────────────────────────────────────────────────────────────
-volatile int      g_currentLayout   = 0;   // 0=tổng quan, 1=nhịp tim, 2=gia tốc
-volatile uint32_t g_btnSwitchLast   = 0;
-volatile uint32_t g_btnConfirmLast  = 0;
+volatile int g_currentLayout = 0;  // 0=tổng quan, 1=nhịp tim, 2=gia tốc
+
+// ── Button ISR flags (volatile, không dùng mutex) ─────────────────────────
+volatile bool     g_btn1Pressed = false;
+volatile bool     g_btn2Pressed = false;
+volatile uint32_t g_btn1LastISR = 0;
+volatile uint32_t g_btn2LastISR = 0;
+
+void IRAM_ATTR isr_btn1() {
+    uint32_t now = millis();
+    if (now - g_btn1LastISR > BTN_DEBOUNCE_MS) {
+        g_btn1LastISR = now;
+        g_btn1Pressed = true;
+    }
+}
+
+void IRAM_ATTR isr_btn2() {
+    uint32_t now = millis();
+    if (now - g_btn2LastISR > BTN_DEBOUNCE_MS) {
+        g_btn2LastISR = now;
+        g_btn2Pressed = true;
+    }
+}
 
 // ── BPM History (guarded by histMutex) ────────────────────────────────────
 int32_t  g_bpmHist[BPM_HIST_SIZE]  = {};
@@ -130,7 +148,7 @@ volatile int32_t   g_measAccum  = 0;
 volatile int       g_measCount  = 0;
 volatile int32_t   g_measResult = 0;
 
-// RTC nội bộ
+// ── RTC nội bộ ────────────────────────────────────────────────────────────
 struct RTCState {
     uint32_t syncEpoch  = 0;
     uint32_t syncMillis = 0;
@@ -140,7 +158,7 @@ struct RTCState {
 };
 volatile RTCState g_rtc;
 
-// NimBLE objects
+// ── NimBLE objects ────────────────────────────────────────────────────────
 NimBLEServer*         pServer       = nullptr;
 NimBLECharacteristic* pMpuChar      = nullptr;
 NimBLECharacteristic* pHealthChar   = nullptr;
@@ -148,16 +166,14 @@ NimBLECharacteristic* pCommandChar  = nullptr;
 NimBLECharacteristic* pDatetimeChar = nullptr;
 bool                  bleConnected  = false;
 
-// MAX30102 objects
+// ── MAX30102 objects ──────────────────────────────────────────────────────
 MAX30105  sensor;
 uint32_t  irBuf[BUF_SIZE], redBuf[BUF_SIZE];
 FIRState  firIR, firRed;
 AGCState  agc;
 MedianBuf mbpm, mspo2;
-// Biquad    bpHPF(0.9150f, -1.8300f, 0.9150f, -1.8226f, 0.8373f);
-// Biquad    bpLPF(0.1441f,  0.2882f, 0.1441f, -0.6776f, 0.2539f);
 
-// OLED
+// ── OLED ──────────────────────────────────────────────────────────────────
 Adafruit_SSD1306 oled(OLED_W, OLED_H, &Wire, OLED_RST);
 
 // BLE Callbacks
@@ -212,7 +228,6 @@ static void rtcSync(const char* s) {
     Serial.printf("[RTC] Synced: %04d-%02d-%02d %02d:%02d:%02d\n",yr,mo,dy,hh,mm,ss);
 }
 
-// Trả về "HH:MM" vào timeBuf và "DD/MM" vào dateBuf
 static void rtcGetParts(char* timeBuf, size_t tLen, char* dateBuf, size_t dLen) {
     xSemaphoreTake(dtMutex, portMAX_DELAY);
     bool synced = g_rtc.synced;
@@ -253,7 +268,7 @@ class DatetimeCallbacks : public NimBLECharacteristicCallbacks {
 
 // BLE init & helpers
 void bleInit() {
-    NimBLEDevice::init("ESP32-SmartWatch_Huynn");
+    NimBLEDevice::init("ESP32-SmartWatch_TE");
     NimBLEDevice::setMTU(64);
     pServer = NimBLEDevice::createServer();
     pServer->setCallbacks(new ServerCallbacks());
@@ -266,7 +281,7 @@ void bleInit() {
     pDatetimeChar->setCallbacks(new DatetimeCallbacks());
     pSvc->start(); pServer->start();
     NimBLEAdvertising* pAdv = NimBLEDevice::getAdvertising();
-    pAdv->setName("ESP32-SmartWatch_Huynn");
+    pAdv->setName("ESP32-SmartWatch_TE");
     pAdv->addServiceUUID(SERVICE_UUID);
     pAdv->enableScanResponse(true);
     NimBLEDevice::startAdvertising();
@@ -348,10 +363,6 @@ static void updateFallDetect(float mag) {
 }
 
 // MAX30102 helpers
-static float applyBiquad(Biquad& f, float x) {
-    float y=f.b0*x+f.z1;
-    f.z1=f.b1*x-f.a1*y+f.z2; f.z2=f.b2*x-f.a2*y; return y;
-}
 static float applyFIR(FIRState& f, float x) {
     f.buf[f.head]=x; f.head=(f.head+1)%FIR_LEN;
     float s=0; for(int i=0;i<FIR_LEN;i++) s+=FIR_W[i]*f.buf[i]; return s;
@@ -375,16 +386,46 @@ static void agcTick(AGCState& agc, uint32_t rawIR, bool fingerOn) {
     else return;
     agc.br=nb; sensor.setPulseAmplitudeRed(agc.br); sensor.setPulseAmplitudeIR(agc.br);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// [FIX] collectSamples — release i2cMutex sau mỗi lần chờ sensor.
+//
+// Vấn đề gốc: taskMAX giữ i2cMutex với portMAX_DELAY trong khi
+// while(!sensor.available()) sensor.check() spin không giới hạn → taskMPU
+// timeout 2ms → không bao giờ đọc được → giá trị đóng băng.
+//
+// Giải pháp: tách thành 2 bước nhỏ, release mutex giữa mỗi sample
+// để taskMPU có cơ hội chen vào. Logic đọc sensor hoàn toàn giữ nguyên.
+// ═══════════════════════════════════════════════════════════════════════════
 static void collectSamples(int from, int count, bool& fingerOn) {
-    for (int i=from; i<from+count; i++) {
-        while(!sensor.available()) sensor.check();
-        uint32_t rawIR=sensor.getIR(), rawRed=sensor.getRed();
-        sensor.nextSample();
-        fingerOn=(rawIR>FINGER_THR);
-        agcTick(agc,rawIR,fingerOn);
-        irBuf[i] =(uint32_t)max(0.0f,applyFIR(firIR, (float)rawIR));
-        redBuf[i]=(uint32_t)max(0.0f,applyFIR(firRed,(float)rawRed));
-        // applyBiquad(bpLPF,applyBiquad(bpHPF,(float)rawIR));
+    for (int i = from; i < from + count; i++) {
+
+        // B1: Chờ sensor có data — release mutex giữa mỗi lần poll
+        // taskMPU (timeout 2ms) có thể chen vào trong khoảng vTaskDelay(1)
+        bool ready = false;
+        while (!ready) {
+            if (xSemaphoreTake(i2cMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                sensor.check();
+                ready = sensor.available();
+                xSemaphoreGive(i2cMutex);  // release ngay, không giữ lâu
+            }
+            if (!ready) vTaskDelay(1);      // yield 1 tick → taskMPU chạy được
+        }
+
+        // B2: Đọc 1 sample — mutex chỉ giữ vài µs
+        uint32_t rawIR = 0, rawRed = 0;
+        if (xSemaphoreTake(i2cMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            rawIR  = sensor.getIR();
+            rawRed = sensor.getRed();
+            sensor.nextSample();
+            xSemaphoreGive(i2cMutex);      // release ngay
+        }
+
+        // Phần xử lý data giữ nguyên hoàn toàn như code gốc
+        fingerOn = (rawIR > FINGER_THR);
+        agcTick(agc, rawIR, fingerOn);
+        irBuf[i]  = (uint32_t)max(0.0f, applyFIR(firIR,  (float)rawIR));
+        redBuf[i] = (uint32_t)max(0.0f, applyFIR(firRed, (float)rawRed));
     }
 }
 
@@ -399,61 +440,47 @@ static void bpmHistoryPush(int32_t bpm) {
     xSemaphoreGive(histMutex);
 }
 
-// Button Handler  — gọi từ taskOLED trước khi render, KHÔNG cần i2cMutex
+// Button Handler — ISR flags, KHÔNG cần mutex, KHÔNG block
 static void handleButtons() {
-    uint32_t now = millis();
-
-    // ── Nút 1: Chuyển layout ─────────────────────────────────────────────────
-    if (digitalRead(BTN_SWITCH_PIN) == HIGH) {
-        if (now - g_btnSwitchLast > BTN_DEBOUNCE_MS) {
-            g_btnSwitchLast = now;
-            g_currentLayout = (g_currentLayout + 1) % NUM_LAYOUTS;
-            Serial.printf("[BTN] Layout → %d\n", (int)g_currentLayout);
-        }
+    if (g_btn1Pressed) {
+        g_btn1Pressed   = false;
+        g_currentLayout = (g_currentLayout + 1) % NUM_LAYOUTS;
+        Serial.printf("[BTN] Layout → %d\n", (int)g_currentLayout);
     }
 
-    // ── Nút 2: Hành động theo context ────────────────────────────────────────
-    if (digitalRead(BTN_CONFIRM_PIN) == HIGH) {
-        if (now - g_btnConfirmLast > BTN_DEBOUNCE_MS) {
-            g_btnConfirmLast = now;
+    if (g_btn2Pressed) {
+        g_btn2Pressed = false;
+        int layout = g_currentLayout;
 
-            int layout = g_currentLayout;
+        if (layout == 1) {
+            xSemaphoreTake(dataMutex, portMAX_DELAY);
+            MeasState ms = g_measState;
+            xSemaphoreGive(dataMutex);
 
-            if (layout == 1) {
-                // Layout Nhịp tim: bắt đầu đo / đo lại
+            if (ms == MEAS_IDLE || ms == MEAS_DONE) {
                 xSemaphoreTake(dataMutex, portMAX_DELAY);
-                MeasState ms = g_measState;
+                g_measState  = MEAS_RUNNING;
+                g_measStart  = millis();
+                g_measAccum  = 0;
+                g_measCount  = 0;
+                g_measResult = 0;
                 xSemaphoreGive(dataMutex);
-
-                if (ms == MEAS_IDLE || ms == MEAS_DONE) {
-                    xSemaphoreTake(dataMutex, portMAX_DELAY);
-                    g_measState  = MEAS_RUNNING;
-                    g_measStart  = millis();
-                    g_measAccum  = 0;
-                    g_measCount  = 0;
-                    g_measResult = 0;
-                    xSemaphoreGive(dataMutex);
-                    Serial.println("[MEAS] Started 20s measurement");
-                }
-                // Nếu đang đo (MEAS_RUNNING) → bỏ qua, không hủy
-
-            } else if (layout == 2) {
-                // Layout Té ngã: reset cảnh báo nếu fall=1
-                xSemaphoreTake(dataMutex, portMAX_DELAY);
-                if (g_fallDetected) {
-                    g_fallDetected = false;
-                    g_fallState    = FALL_IDLE;
-                    Serial.println("[BTN] Fall alert reset by user");
-                }
-                xSemaphoreGive(dataMutex);
+                Serial.println("[MEAS] Started 20s measurement");
             }
-            // Layout 0: Nút 2 không có tác dụng đặc biệt
+
+        } else if (layout == 2) {
+            xSemaphoreTake(dataMutex, portMAX_DELAY);
+            if (g_fallDetected) {
+                g_fallDetected = false;
+                g_fallState    = FALL_IDLE;
+                Serial.println("[BTN] Fall alert reset by user");
+            }
+            xSemaphoreGive(dataMutex);
         }
     }
 }
 
 // OLED Draw helpers
-// Vẽ 3 chấm chỉ trang — gọi sau khi set textSize/cursor cho header
 static void drawPageDots(int y) {
     for (int i = 0; i < NUM_LAYOUTS; i++) {
         int px = 103 + i * 8;
@@ -462,7 +489,6 @@ static void drawPageDots(int y) {
     }
 }
 
-// Vẽ progress bar  — x,y = top-left góc ngoài, w,h = kích thước tổng
 static void drawProgressBar(int x, int y, int w, int h, int pct) {
     pct = constrain(pct, 0, 100);
     oled.drawRect(x, y, w, h, SSD1306_WHITE);
@@ -470,10 +496,7 @@ static void drawProgressBar(int x, int y, int w, int h, int pct) {
     if (fillW > 0) oled.fillRect(x+1, y+1, fillW, h-2, SSD1306_WHITE);
 }
 
-// Vẽ biểu đồ BPM history dạng bar chart
-// cx,cy = top-left, cw = width, ch = height (bao gồm cả viền)
 static void drawBpmChart(int cx, int cy, int cw, int ch) {
-    // Lấy snapshot
     xSemaphoreTake(histMutex, portMAX_DELAY);
     int     count = g_bpmHistCount;
     int     head  = g_bpmHistHead;
@@ -481,7 +504,6 @@ static void drawBpmChart(int cx, int cy, int cw, int ch) {
     memcpy(hist, g_bpmHist, sizeof(g_bpmHist));
     xSemaphoreGive(histMutex);
 
-    // Khung
     oled.drawRect(cx, cy, cw, ch, SSD1306_WHITE);
 
     if (count == 0) {
@@ -491,66 +513,48 @@ static void drawBpmChart(int cx, int cy, int cw, int ch) {
         return;
     }
 
-    // Vẽ bars trong vùng cx+1 → cx+cw-2, cao ch-2
     int innerW = cw - 2;
     int innerH = ch - 2;
-    // Mỗi bar chiếm innerW/BPM_HIST_SIZE pixels
     float bw = (float)innerW / BPM_HIST_SIZE;
 
     for (int i = 0; i < count; i++) {
         int idx   = (head - count + i + BPM_HIST_SIZE) % BPM_HIST_SIZE;
         int32_t v = hist[idx];
         if (v <= 0) continue;
-
-        // Map BPM [50..150] → bar height [1..innerH]
         int barH = map(constrain(v, 50, 150), 50, 150, 1, innerH);
         int bx   = cx + 1 + (int)(i * bw);
         int by   = cy + ch - 1 - barH;
-        int bwi  = max(1, (int)bw);   // pixel width của bar (ít nhất 1px)
-
-        // Vẽ bar dạng đường đứng (tiết kiệm pixel)
+        int bwi  = max(1, (int)bw);
         oled.fillRect(bx, by, bwi, barH, SSD1306_WHITE);
     }
 }
 
-// RENDER LAYOUT 0 — Tổng quan (Overview)
-// y=0–15  : HH:MM (size2, 60px) | DD/MM (size1) | page dots | BLE icon
-// y=16    : ─────────────────────────────
-// y=18–42 : HR + SpO2 (size2 cho số) OR "Đặt ngón tay"
-// y=43    : ─────────────────────────────
-// y=45–52 : Mag | FALL status
-// y=54–63 : BLE status
+// RENDER LAYOUT 0 — Tổng quan
 static void renderLayout0(int32_t bpm, int32_t spo2, bool finger, float mag, bool fall) {
     char timeBuf[8], dateBuf[8];
     rtcGetParts(timeBuf, sizeof(timeBuf), dateBuf, sizeof(dateBuf));
 
-    // ── Thời gian lớn (size2 = 12×16px) ──────────────────────────────────────
     oled.setTextSize(2);
     oled.setCursor(0, 0);
-    oled.print(timeBuf);   // "HH:MM" = 5 × 12 = 60px
+    oled.print(timeBuf);
 
-    // ── Ngày (size1, bên phải HH:MM) ──────────────────────────────────────────
     oled.setTextSize(1);
     oled.setCursor(68, 4);
-    oled.print(dateBuf);   // "DD/MM"
+    oled.print(dateBuf);
 
-    // ── Page dots + BLE icon ───────────────────────────────────────────────────
     drawPageDots(3);
     oled.drawLine(0, 17, OLED_W-1, 17, SSD1306_WHITE);
 
-    // ── HR + SpO2 ─────────────────────────────────────────────────────────────
     if (!finger) {
         oled.setTextSize(1);
         oled.setCursor(18, 24); oled.print("wear device on");
         oled.setCursor(28, 34); oled.print("your wrist...");
     } else {
-        // HR
         oled.setTextSize(1); oled.setCursor(0, 19);  oled.print("HR");
         oled.setTextSize(2); oled.setCursor(0, 27);
         if (bpm > 0) oled.print(bpm); else oled.print("--");
         oled.setTextSize(1); oled.setCursor(36, 36); oled.print("bpm");
 
-        // SpO2
         oled.setTextSize(1); oled.setCursor(72, 19); oled.print("SpO2");
         oled.setTextSize(2); oled.setCursor(72, 27);
         if (spo2 > 0) oled.print(spo2); else oled.print("--");
@@ -559,7 +563,6 @@ static void renderLayout0(int32_t bpm, int32_t spo2, bool finger, float mag, boo
 
     oled.drawLine(0, 44, OLED_W-1, 44, SSD1306_WHITE);
 
-    // ── Mag + FALL indicator ──────────────────────────────────────────────────
     oled.setTextSize(1);
     oled.setCursor(0, 47);
     oled.printf("M=%.2f==>", mag);
@@ -567,43 +570,26 @@ static void renderLayout0(int32_t bpm, int32_t spo2, bool finger, float mag, boo
     oled.setCursor(54, 47);
     if (fall) {
         if ((millis()/400)%2 == 0) oled.print("!FALL!");
-        // else: blank để tạo hiệu ứng nhấp nháy
     } else {
         oled.print("SAFE");
     }
 
-    // ── BLE status ────────────────────────────────────────────────────────────
     oled.setCursor(0, 56);
     oled.print(bleConnected ? "BLE:Connected" : "BLE:Disconnected...");
 }
 
-
 // RENDER LAYOUT 1 — Nhịp tim chi tiết
-//
-// y=0–8   : Header "NHIP TIM" | page dots
-// y=9     : ─────
-// y=10–29 : Bar chart BPM 15 phút (20px)
-// y=30    : ─────
-// y=32–40 : Min / Max hôm nay
-// y=41    : ─────
-// y=43–63 : IDLE → "Now: X BPM" + hint BTN2
-//           RUNNING → cảnh báo + progress bar
-//           DONE → kết quả + hint đo lại
 static void renderLayout1(int32_t bpm, bool finger) {
-    // ── Header ────────────────────────────────────────────────────────────────
     oled.setTextSize(1);
     oled.setCursor(0, 0);
     oled.print("HEART RATE");
     drawPageDots(3);
     oled.drawLine(0, 9, OLED_W-1, 9, SSD1306_WHITE);
 
-    // ── Biểu đồ BPM history (15 phút) ────────────────────────────────────────
-    // Vùng: x=0, y=10, w=128, h=20
     drawBpmChart(0, 10, 128, 20);
 
     oled.drawLine(0, 31, OLED_W-1, 31, SSD1306_WHITE);
 
-    // ── Min / Max hôm nay ─────────────────────────────────────────────────────
     xSemaphoreTake(histMutex, portMAX_DELAY);
     int32_t bMin = g_bpmMinToday;
     int32_t bMax = g_bpmMaxToday;
@@ -616,7 +602,6 @@ static void renderLayout1(int32_t bpm, bool finger) {
 
     oled.drawLine(0, 42, OLED_W-1, 42, SSD1306_WHITE);
 
-    // ── Vùng dưới: thay đổi theo trạng thái đo ───────────────────────────────
     xSemaphoreTake(dataMutex, portMAX_DELAY);
     MeasState ms     = g_measState;
     uint32_t  mStart = g_measStart;
@@ -626,13 +611,11 @@ static void renderLayout1(int32_t bpm, bool finger) {
     oled.setTextSize(1);
 
     if (ms == MEAS_IDLE) {
-        // Nhịp tim hiện tại (cập nhật liên tục từ MAX30102)
         oled.setCursor(0, 44);
         oled.print("HR: ");
         if (finger && bpm > 0) oled.printf("%ld BPM", bpm);
         else                   oled.print("-- BPM");
 
-        // Gợi ý nút 2
         oled.setCursor(0, 55);
         oled.print("Press BTN2 to start");
 
@@ -641,15 +624,12 @@ static void renderLayout1(int32_t bpm, bool finger) {
         if (elapsed > MEAS_DURATION_MS) elapsed = MEAS_DURATION_MS;
         int pct = (int)(elapsed * 100UL / MEAS_DURATION_MS);
 
-        // Cảnh báo — nhấp nháy nhẹ
         oled.setCursor(0, 44);
         if ((millis()/600)%2 == 0) oled.print("Keep still!");
         else                       oled.print("Measuring...");
 
-        // Progress bar: x=0 y=53 w=108 h=8
         drawProgressBar(0, 54, 100, 8, pct);
 
-        // Phần trăm bên phải bar
         oled.setCursor(104, 55);
         oled.printf("%d%%", pct);
 
@@ -664,63 +644,42 @@ static void renderLayout1(int32_t bpm, bool finger) {
 }
 
 // RENDER LAYOUT 2 — Gia tốc & Té ngã
-//
-// y=0–8   : Header "GIA TOC & TE NGA" | page dots
-// y=9     : ─────
-// y=11–19 : Nguy cơ té ngã (nhấp nháy khi FALL=1)
-// y=21–29 : Mag | Ax Ay Az
-// y=30    : ─────
-// y=32–40 : Uptime
-// y=42–50 : BLE status
-// y=52–63 : Version | BTN2 hint (khi fall=1)
 static void renderLayout2(float mag, float ax, float ay, float az, bool fall) {
-    // ── Header ────────────────────────────────────────────────────────────────
     oled.setTextSize(1);
     oled.setCursor(0, 0);
     oled.print("FALL DETECTION");
     drawPageDots(3);
     oled.drawLine(0, 9, OLED_W-1, 9, SSD1306_WHITE);
 
-    // ── Nguy cơ té ngã ────────────────────────────────────────────────────────
     oled.setTextSize(1);
     oled.setCursor(0, 11);
     if (fall) {
-        // Nhấp nháy cảnh báo
         if ((millis()/400)%2 == 0) oled.print("!!Risk: HIGH!!");
-        // else để trống → tạo hiệu ứng blink
     } else {
         oled.print("Risk: LOW");
     }
 
-    // ── Gia tốc ───────────────────────────────────────────────────────────────
     oled.setCursor(0, 21);
     oled.printf("Mag:%.2fg", mag);
-
     oled.setCursor(70, 21);
     oled.printf("X:% .1f", ax);
-
     oled.setCursor(0, 30);
     oled.printf("Y:% .1f  Z:% .1f", ay, az);
 
     oled.drawLine(0, 40, OLED_W-1, 40, SSD1306_WHITE);
 
-    // ── Uptime đồng hồ ────────────────────────────────────────────────────────
     uint32_t upSec = millis() / 1000;
     uint32_t upH   = upSec / 3600;
     uint32_t upM   = (upSec % 3600) / 60;
-
     oled.setCursor(0, 42);
     oled.printf("Uptime: %luh %02lum", upH, upM);
 
-    // ── BLE status ────────────────────────────────────────────────────────────
     oled.setCursor(0, 52);
     oled.print(bleConnected ? "BLE:Connected" : "BLE:Disconnected...");
 
-    // ── Firmware version ──────────────────────────────────────────────────────
     oled.setCursor(80, 62);
     oled.print("v" FW_VERSION);
 
-    // ── Gợi ý BTN2 khi có fall ───────────────────────────────────────────────
     if (fall) {
         oled.setCursor(0, 56);
         if ((millis()/600)%2 == 0) oled.print("[BTN2]Reset alert");
@@ -729,7 +688,6 @@ static void renderLayout2(float mag, float ax, float ay, float az, bool fall) {
 
 // renderOLED — dispatcher chính
 static void renderOLED() {
-    // Lấy snapshot dữ liệu
     xSemaphoreTake(dataMutex, portMAX_DELAY);
     int32_t bpm   = g_dispBPM;
     int32_t spo2  = g_dispSpO2;
@@ -739,15 +697,12 @@ static void renderOLED() {
     bool    fall  = g_fallDetected;
     xSemaphoreGive(dataMutex);
 
-    // Lấy i2cMutex để vẽ OLED (timeout 300ms > collectSamples ~250ms)
     if (xSemaphoreTake(i2cMutex, pdMS_TO_TICKS(300)) != pdTRUE) return;
 
     oled.clearDisplay();
     oled.setTextColor(SSD1306_WHITE);
 
-    int layout = g_currentLayout;
-
-    switch (layout) {
+    switch ((int)g_currentLayout) {
         case 0:  renderLayout0(bpm, spo2, finger, mag, fall); break;
         case 1:  renderLayout1(bpm, finger);                  break;
         case 2:  renderLayout2(mag, ax, ay, az, fall);        break;
@@ -758,8 +713,8 @@ static void renderOLED() {
     xSemaphoreGive(i2cMutex);
 }
 
-
-// TASK 1 — MPU6050 @ ~66 Hz (Core 0, priority 3)
+// TASK 1 — MPU6050 @ ~40 Hz (priority 1)
+// Giữ nguyên hoàn toàn, timeout 2ms đủ vì collectSamples đã release mutex
 void taskMPU(void* param) {
     TickType_t       xLastWake = xTaskGetTickCount();
     const TickType_t xPeriod   = pdMS_TO_TICKS(MPU_INTERVAL_MS);
@@ -793,17 +748,15 @@ void taskMPU(void* param) {
     }
 }
 
-
-// TASK 2 — MAX30102 HR/SpO2 (Core 1, priority 2)
+// TASK 2 — MAX30102 HR/SpO2 (priority 2)
+// [FIX] Bỏ xSemaphoreTake/Give i2cMutex bên ngoài collectSamples
+//       vì collectSamples đã tự quản lý mutex bên trong
 void taskMAX30102(void* param) {
     bool fingerOn = false, prevFinger = false;
 
-    // Init buffer
+    // Fill buffer ban đầu — gọi trực tiếp, không bọc mutex ngoài
     for (int offset = 0; offset < BUF_SIZE; offset += SHIFT_SIZE) {
-        if (xSemaphoreTake(i2cMutex, portMAX_DELAY) == pdTRUE) {
-            collectSamples(offset, SHIFT_SIZE, fingerOn);
-            xSemaphoreGive(i2cMutex);
-        }
+        collectSamples(offset, SHIFT_SIZE, fingerOn);  // [FIX] bỏ mutex ngoài
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 
@@ -813,12 +766,10 @@ void taskMAX30102(void* param) {
     uint32_t lastHealthSend = millis();
 
     while (true) {
-        // Reset khi rút ngón
         if (!fingerOn && prevFinger) {
             mbpm=MedianBuf{}; mspo2=MedianBuf{};
             xSemaphoreTake(dataMutex, portMAX_DELAY);
             g_dispBPM=g_dispSpO2=0; g_fingerOn=false;
-            // Reset measurement nếu đang đo
             if (g_measState == MEAS_RUNNING) g_measState = MEAS_IDLE;
             xSemaphoreGive(dataMutex);
             agc.br=60; agc.accum=0; agc.n=0;
@@ -829,20 +780,14 @@ void taskMAX30102(void* param) {
         }
         prevFinger = fingerOn;
 
-        // Shift buffer
         for (int i=SHIFT_SIZE; i<BUF_SIZE; i++) {
             irBuf[i-SHIFT_SIZE]=irBuf[i]; redBuf[i-SHIFT_SIZE]=redBuf[i];
         }
 
-        // Lấy mẫu mới (~250ms)
-        if (xSemaphoreTake(i2cMutex, portMAX_DELAY)==pdTRUE) {
-            collectSamples(BUF_SIZE-SHIFT_SIZE, SHIFT_SIZE, fingerOn);
-            xSemaphoreGive(i2cMutex);
-        }
+        collectSamples(BUF_SIZE-SHIFT_SIZE, SHIFT_SIZE, fingerOn);  // [FIX] bỏ mutex ngoài
 
-        // Tính HR/SpO2
         maxim_heart_rate_and_oxygen_saturation(irBuf,BUF_SIZE,redBuf,&spo2,&sv,&bpm,&bv);
-        if (bv && bpm>=BPM_MIN && bpm<=BPM_MAX)   medPush(mbpm,  bpm);
+        if (bv && bpm>=BPM_MIN && bpm<=BPM_MAX)    medPush(mbpm,  bpm);
         if (sv && spo2>=SPO2_MIN && spo2<=SPO2_MAX) medPush(mspo2, spo2);
 
         int32_t dispBPM  = (fingerOn && mbpm.count >=3) ? bufMedian(mbpm.arr,  mbpm.count)  : 0;
@@ -855,31 +800,28 @@ void taskMAX30102(void* param) {
         Serial.printf("[MAX] bpm=%ld(%c) spo2=%ld(%c) disp=%ld/%ld finger=%c\n",
             bpm,bv?'V':'X',spo2,sv?'V':'X',dispBPM,dispSpO2,fingerOn?'Y':'N');
 
-        // ── BPM History update (mỗi 30s nếu có đọc) ─────────────────────────
+        // BPM History (mỗi 30s)
         uint32_t nowMs = millis();
         if (nowMs - g_lastHistUpdate >= BPM_HIST_INTERVAL_MS && fingerOn && dispBPM > 0) {
             g_lastHistUpdate = nowMs;
             bpmHistoryPush(dispBPM);
         }
 
-        // ── Chế độ đo chính xác 20s ──────────────────────────────────────────
+        // Chế độ đo chính xác 20s
         xSemaphoreTake(dataMutex, portMAX_DELAY);
         MeasState ms = g_measState;
         xSemaphoreGive(dataMutex);
 
         if (ms == MEAS_RUNNING) {
             uint32_t elapsed = millis() - g_measStart;
-
             if (elapsed >= MEAS_DURATION_MS) {
-                // Hoàn thành đo
                 xSemaphoreTake(dataMutex, portMAX_DELAY);
                 g_measResult = (g_measCount > 0) ? (g_measAccum / g_measCount) : 0;
                 g_measState  = MEAS_DONE;
                 xSemaphoreGive(dataMutex);
-                Serial.printf("[MEAS] Done. Result=%ld BPM (avg of %d samples)\n",
+                Serial.printf("[MEAS] Done. Result=%ld BPM (%d samples)\n",
                               g_measResult, g_measCount);
             } else if (fingerOn && dispBPM > 0) {
-                // Tích lũy mẫu
                 xSemaphoreTake(dataMutex, portMAX_DELAY);
                 g_measAccum += dispBPM;
                 g_measCount++;
@@ -887,7 +829,7 @@ void taskMAX30102(void* param) {
             }
         }
 
-        // ── Gửi health qua BLE mỗi 1s ────────────────────────────────────────
+        // Gửi health qua BLE mỗi 1s
         if (nowMs - lastHealthSend >= HEALTH_BLE_INTERVAL_MS) {
             xSemaphoreTake(dataMutex, portMAX_DELAY);
             bool fall = g_fallDetected;
@@ -895,18 +837,19 @@ void taskMAX30102(void* param) {
             bleSendHealth(dispBPM, dispSpO2, fingerOn, fall);
             lastHealthSend = nowMs;
         }
+
+        vTaskDelay(1);
     }
 }
 
-
-// TASK 3 — OLED render @ 5 Hz (Core 0, priority 1)
+// TASK 3 — OLED render @ 5 Hz (priority 1)
 void taskOLED(void* param) {
-    vTaskDelay(pdMS_TO_TICKS(100));   // chờ các task khác init xong
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     while (true) {
-        handleButtons();   // đọc GPIO — KHÔNG cần i2cMutex
-        renderOLED();      // tự lấy i2cMutex bên trong
-        vTaskDelay(pdMS_TO_TICKS(200));  // ~5 Hz
+        handleButtons();
+        renderOLED();
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
 
@@ -926,7 +869,7 @@ static void i2cScan() {
 
 // SETUP
 void setup() {
-    // ── 1. Serial ─────────────────────────────────────────────────────────────
+    // 1. Serial
     Serial.begin(115200);
 #if ARDUINO_USB_CDC_ON_BOOT
     unsigned long t0 = millis();
@@ -934,29 +877,33 @@ void setup() {
 #else
     delay(500);
 #endif
-    Serial.println("\n=== ESP32 SmartWatch BOOT v" FW_VERSION " ===");
+    Serial.println("\n=== ESP32-C3 SmartWatch BOOT v" FW_VERSION " ===");
 
-    // ── 2. I2C ────────────────────────────────────────────────────────────────
+    // 2. I2C
     Wire.begin(I2C_SDA, I2C_SCL);
     Wire.setClock(400000UL);
+    Wire.setTimeOut(3);  // [FIX] tránh Wire treo khi LiPo/powerbank boot chậm
     delay(100);
     i2cScan();
 
-    // ── 3. Buttons ────────────────────────────────────────────────────────────
-    // GPIO 32/33 hỗ trợ INPUT_PULLUP — active LOW
+    // 3. Buttons — PULL UP, active LOW
     pinMode(BTN_SWITCH_PIN,  INPUT_PULLUP);
     pinMode(BTN_CONFIRM_PIN, INPUT_PULLUP);
-    Serial.printf("[BTN] Switch=GPIO%d  Confirm=GPIO%d (active LOW)\n",
+
+    attachInterrupt(digitalPinToInterrupt(BTN_SWITCH_PIN),  isr_btn1, FALLING);
+    attachInterrupt(digitalPinToInterrupt(BTN_CONFIRM_PIN), isr_btn2, FALLING);
+
+    Serial.printf("[BTN] Switch=GPIO%d  Confirm=GPIO%d (pull-up, active LOW)\n",
                   BTN_SWITCH_PIN, BTN_CONFIRM_PIN);
 
-    // ── 4. Mutex ──────────────────────────────────────────────────────────────
+    // 4. Mutex
     i2cMutex  = xSemaphoreCreateMutex();
     bleMutex  = xSemaphoreCreateMutex();
     dataMutex = xSemaphoreCreateMutex();
     dtMutex   = xSemaphoreCreateMutex();
     histMutex = xSemaphoreCreateMutex();
 
-    // ── 5. OLED ───────────────────────────────────────────────────────────────
+    // 5. OLED
     if (!oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
         Serial.println("[OLED] FAILED");
     } else {
@@ -967,10 +914,10 @@ void setup() {
         Serial.println("[OLED] OK");
     }
 
-    // ── 6. BLE ────────────────────────────────────────────────────────────────
+    // 6. BLE
     bleInit();
 
-    // ── 7. MAX30102 ───────────────────────────────────────────────────────────
+    // 7. MAX30102
     if (!sensor.begin(Wire, I2C_SPEED_FAST)) {
         Serial.println("[MAX30102] FAILED");
         oled.clearDisplay();
@@ -982,30 +929,27 @@ void setup() {
     sensor.setup(60, 4, 2, 100, 411, 4096);
     Serial.println("[MAX30102] OK");
 
-    // ── 8. MPU6050 ────────────────────────────────────────────────────────────
+    // 8. MPU6050
     if (!mpuInit()) Serial.println("[MPU6050] FAILED — fall detect disabled");
 
-    // ── 9. OLED boot done ─────────────────────────────────────────────────────
+    // 9. OLED boot done
     oled.clearDisplay();
     oled.setTextSize(1); oled.setTextColor(SSD1306_WHITE);
     oled.setCursor(22, 20); oled.print("Initializing...");
-    oled.setCursor(5, 32); oled.print("BTN1:Switch Layout ");
-    oled.setCursor(5, 44); oled.print("BTN2:Measure/Confirm");
+    oled.setCursor(5, 32);  oled.print("BTN1:Switch Layout");
+    oled.setCursor(5, 44);  oled.print("BTN2:Measure/Confirm");
     oled.display();
     delay(100);
 
-    // ── 10. FreeRTOS Tasks ────────────────────────────────────────────────────
-    // Core 0: taskMPU (pri 3) + taskOLED (pri 1)
-    // Core 1: taskMAX (pri 2)
-    xTaskCreatePinnedToCore(taskMPU,      "taskMPU",  4096, nullptr, 3, nullptr, 0);
-    xTaskCreatePinnedToCore(taskOLED,     "taskOLED", 4096, nullptr, 1, nullptr, 0);
-    xTaskCreatePinnedToCore(taskMAX30102, "taskMAX",  8192, nullptr, 2, nullptr, 1);
+    // 10. FreeRTOS Tasks
+    xTaskCreate(taskMPU,     "taskMPU",  4096, nullptr, 1, nullptr);
+    xTaskCreate(taskOLED,    "taskOLED", 4096, nullptr, 1, nullptr);
+    xTaskCreate(taskMAX30102,"taskMAX",  8192, nullptr, 1, nullptr);
 
     Serial.println("[BOOT] All systems go!");
-    Serial.println("[BOOT] BTN1(GPIO" + String(BTN_SWITCH_PIN) + ")=Switch layout");
-    Serial.println("[BOOT] BTN2(GPIO" + String(BTN_CONFIRM_PIN)+ ")=Confirm/Measure");
+    Serial.printf("[BOOT] BTN1(GPIO%d)=Switch layout (pull-up)\n", BTN_SWITCH_PIN);
+    Serial.printf("[BOOT] BTN2(GPIO%d)=Confirm/Measure (pull-up)\n", BTN_CONFIRM_PIN);
 }
-
 
 // LOOP — idle
 void loop() {
